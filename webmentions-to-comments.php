@@ -6,7 +6,7 @@
  * Author URI: https://janboddez.tech/
  * License: GNU General Public License v2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
- * Version: 0.1
+ * Version: 0.2
  */
 
 // Prevent this script from being loaded directly.
