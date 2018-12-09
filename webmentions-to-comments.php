@@ -14,16 +14,18 @@ defined( 'ABSPATH' ) or exit;
 
 /**
  * Main plugin class.
+ *
+ * @since 0.2
  */
 class Webmention_Comments {
 	/**
 	 * Class constructor.
+	 *
+	 * @since 0.2
 	 */
 	public function __construct() {
 		/**
 		 * Registers a new REST API endpoint.
-		 *
-		 * @since 0.2
 		 */
 		add_action( 'rest_api_init', function () {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
