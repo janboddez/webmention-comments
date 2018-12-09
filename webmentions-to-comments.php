@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: JB Webmentions
+ * Plugin Name: Webmentions to Comments
  * Description: Receive webmentions from services like Bridgy.
  * Author: Jan Boddez
  * Author URI: https://janboddez.tech/
