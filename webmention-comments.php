@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: Webmention Comments
- * Description: Turn incoming webmentions, from services like Bridgy, into WordPress comments.
+ * Description: Turn incoming Webmentions, from other blogs or services like Bridgy, into WordPress comments.
  * Author: Jan Boddez
  * Author URI: https://janboddez.tech/
  * License: GNU General Public License v2 or later
@@ -34,7 +34,8 @@ class Webmention_Comments {
 			) );
 		} );
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
-		add_action( 'hourly_process_webmentions', array( $this, 'process_webmentions' ) );
+		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
+		add_action( 'process_webmentions', array( $this, 'process_webmentions' ) );
 	}
 
 	/**
@@ -53,12 +54,11 @@ class Webmention_Comments {
 		global $wp_rewrite;
 
 		// Get the target post's slug, sans permalink front.
-		$slug = str_replace(
+		$slug = trim( str_replace(
 			$wp_rewrite->front,
 			'',
 			parse_url( $request['target'], PHP_URL_PATH )
-		);
-		$slug = trim( $slug, '/' );
+		), '/' );
 
 		// Fetch the post.
 		$post = get_page_by_path( $slug, OBJECT, 'post' );
@@ -189,13 +189,9 @@ class Webmention_Comments {
 				$comment_id = wp_new_comment( $comment_data, true );
 				$wpdb->update(
 					$table_name,
-					array(
-						'status' => 'processed',
-					), 
-					array( 'id' => $webmention->id ), 
-					array( 
-						'%s',
-					), 
+					array( 'status' => 'processed' ),
+					array( 'id' => $webmention->id ),
+					array( '%s' ),
 					array( '%d' )
 				);
 
@@ -233,8 +229,8 @@ class Webmention_Comments {
 		add_option( 'webmention_comments_db_version', $this->db_version );
 
 		// Set up cron event for Webmention processing.
-		if ( false ===  wp_next_scheduled( 'hourly_process_webmentions' ) ) {
-			wp_schedule_event( time(), 'hourly', 'hourly_process_webmentions' );
+		if ( false ===  wp_next_scheduled( 'process_webmentions' ) ) {
+			wp_schedule_event( time(), 'hourly', 'process_webmentions' );
 		}
 	}
 
@@ -243,7 +239,7 @@ class Webmention_Comments {
 	 */
 	public function deactivate() {
 		// Unset cron event for Webmention processing.
-		wp_clear_scheduled_hook( 'hourly_process_webmentions' );
+		wp_clear_scheduled_hook( 'process_webmentions' );
 	}
 }
 
