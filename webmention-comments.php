@@ -27,15 +27,16 @@ class Webmention_Comments {
 		 *
 		 * @since 0.2
 		 */
+		register_activation_hook( __FILE__, array( $this, 'activate' ) );
+		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 		add_action( 'rest_api_init', function () {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
 				'methods' => 'POST',
 				'callback' => array( $this, 'store_webmention' ),
 			) );
 		} );
-		register_activation_hook( __FILE__, array( $this, 'activate' ) );
-		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 		add_action( 'process_webmentions', array( $this, 'process_webmentions' ) );
+		add_action( 'wp_head', array( $this, 'webmention_link' ) );
 	}
 
 	/**
@@ -201,6 +202,10 @@ class Webmention_Comments {
 				}
 			}
 		}
+	}
+
+	public function webmention_link() {
+		echo '<link rel="webmention" href="'. esc_url( get_rest_url( '/webmention-comments/v1/create') ) . '" />' . PHP_EOL;
 	}
 
 	/**
