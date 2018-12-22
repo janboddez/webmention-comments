@@ -21,18 +21,16 @@ class Webmention_Comments {
 
 	/**
 	 * Class constructor.
+	 *
+	 * @since 0.1
 	 */
 	public function __construct() {
-		/**
-		 * Registers a new REST API endpoint.
-		 *
-		 * @since 0.2
-		 */
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
+		register_uninstall_hook( __FILE__, array( $this, 'uninstall' ) );
 		add_action( 'rest_api_init', function() {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
-				'methods'  => 'POST',
+				'methods' => 'POST',
 				'callback' => array( $this, 'store_webmention' ),
 			) );
 		} );
@@ -41,11 +39,12 @@ class Webmention_Comments {
 	}
 
 	/**
-	 * Parses incoming webmentions.
+	 * Stores incoming webmentions for future parsing.
 	 *
 	 * @param WP_REST_Request $request WP REST API request.
+	 * @return WP_REST_Response Response in JSON format.
 	 *
-	 * @since 0.2
+	 * @since 0.3
 	 */
 	public function store_webmention( $request ) {
 		// Verify source nor target are invalid URLs.
@@ -82,11 +81,11 @@ class Webmention_Comments {
 
 		$num_rows = $wpdb->insert(
 			$wpdb->prefix . 'webmention_comments',
-			array( 
-				'source'     => esc_url( $request['source'] ),
-				'post_id'    => $post->ID,
-				'ip'         => $ip,
-				'status'     => 'draft',
+			array(
+				'source' => esc_url( $request['source'] ),
+				'post_id' => $post->ID,
+				'ip' => $ip,
+				'status' => 'draft',
 				'created_at' => current_time( 'mysql' ),
 			)
 		);
@@ -100,10 +99,15 @@ class Webmention_Comments {
 		return new WP_Error( 'invalid_request', 'Invalid source or target', array( 'status' => 400 ) );
 	}
 
+	/**
+	 * Processes stored webmentions (currently limited to ten per hour).
+	 *
+	 * @since 0.3
+	 */
 	public function process_webmentions() {
 		global $wpdb;
 
-		$table_name  = $wpdb->prefix . 'webmention_comments';
+		$table_name = $wpdb->prefix . 'webmention_comments';
 		$webmentions = $wpdb->get_results( "SELECT id, source, post_id, ip, created_at FROM $table_name WHERE status = 'draft' LIMIT 10" );
 
 		if ( empty( $webmentions ) || ! is_array( $webmentions ) ) {
@@ -115,15 +119,15 @@ class Webmention_Comments {
 
 			// Some defaults.
 			$comment_data = array(
-				'comment_post_ID'      => $webmention->post_id,
-				'comment_author'       => $host,
+				'comment_post_ID' => $webmention->post_id,
+				'comment_author' => $host,
 				'comment_author_email' => 'someone@example.com',
-				'comment_author_url'   => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
-				'comment_author_IP'    => $webmention->ip,
-				'comment_content'      => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>.', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
-				'comment_type'         => '',
-				'comment_parent'       => 0,
-				'user_id'              => 0,
+				'comment_author_url' => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
+				'comment_author_IP' => $webmention->ip,
+				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>.', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
+				'comment_type' => '',
+				'comment_parent' => 0,
+				'user_id' => 0,
 			);
 
 			// Load microformats2 parser.
@@ -162,11 +166,11 @@ class Webmention_Comments {
 							if ( ! empty( $microformat['properties']['published'][0] ) ) {
 								if ( 0 !== strpos( $host, 'brid-gy.appspot.com' ) ) {
 									// Bridgy uses GMT.
-									$comment_data['comment_date']     = get_date_from_gmt( date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) ) );
+									$comment_data['comment_date'] = get_date_from_gmt( date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) ) );
 									$comment_data['comment_date_gmt'] = date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) );
 								} else {
 									// My WordPress site plus Webmention plugin does not.
-									$comment_data['comment_date']     = date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) );
+									$comment_data['comment_date'] = date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) );
 									$comment_data['comment_date_gmt'] = get_gmt_from_date( date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) ) );
 								}
 							}
@@ -205,17 +209,24 @@ class Webmention_Comments {
 		}
 	}
 
+	/**
+	 * Broadcasts the Webmention endpoint on the front end.
+	 *
+	 * @since 0.3
+	 */
 	public function webmention_link() {
 		echo '<link rel="webmention" href="'. esc_url( get_rest_url( null, '/webmention-comments/v1/create') ) . '" />' . PHP_EOL;
 	}
 
 	/**
-	 * Sets WordPress up for use with this plugin.
+	 * Sets things up on activation.
+	 *
+	 * @since 0.3
 	 */
 	public function activate() {
 		global $wpdb;
 
-		$table_name      = $wpdb->prefix . 'webmention_comments';
+		$table_name = $wpdb->prefix . 'webmention_comments';
 		$charset_collate = $wpdb->get_charset_collate();
 
 		// Create database table.
@@ -232,21 +243,38 @@ class Webmention_Comments {
 		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 		dbDelta( $sql );
 
-		// Store current database version.
-		add_option( 'webmention_comments_db_version', $this->db_version );
-
-		// Set up cron event for Webmention processing.
+		// Set up cron event for asynchronous Webmention processing.
 		if ( false === wp_next_scheduled( 'process_webmentions' ) ) {
 			wp_schedule_event( time(), 'hourly', 'process_webmentions' );
 		}
+
+		// Store current database version.
+		add_option( 'webmention_comments_db_version', $this->db_version );
 	}
 
 	/**
-	 * Cleans up after deactivation.
+	 * Cleans things up on deactivation.
+	 *
+	 * @since 0.3
 	 */
 	public function deactivate() {
-		// Unset cron event for Webmention processing.
 		wp_clear_scheduled_hook( 'process_webmentions' );
+	}
+
+	/**
+	 * Really cleans up during uninstall.
+	 *
+	 * @since 0.3
+	 */
+	public function uninstall() {
+		global $wpdb;
+
+		// Delete database table.
+		$table_name = $wpdb->prefix . 'webmention_comments';
+		$wpdb->query( "DROP TABLE IF EXISTS $table_name" );
+
+		// Delete current database version.
+		delete_option( 'webmention_comments_db_version' );
 	}
 }
 
