@@ -1,4 +1,4 @@
 # Webmentions to Comments
-Turn tweets into blog comments, using Bridgy and webmentions
+Turn webmentions into blog comments.
 
-A rather simple webmentions plugin. Currently supports only incoming webmentions, from [Bridgy](https://brid.gy/).
+Supports only incoming webmentions. These incoming webmentions undergo basic validation and are then dumped into a database table. The content of that table is parsed once per hour, asynchronously. Source URLs of which the markup contains so-called microformats—Bridgy, most blogs—undergo some additional, rudimentary parsing.
