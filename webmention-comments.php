@@ -229,7 +229,7 @@ class Webmention_Comments {
 		add_option( 'webmention_comments_db_version', $this->db_version );
 
 		// Set up cron event for Webmention processing.
-		if ( false ===  wp_next_scheduled( 'process_webmentions' ) ) {
+		if ( false === wp_next_scheduled( 'process_webmentions' ) ) {
 			wp_schedule_event( time(), 'hourly', 'process_webmentions' );
 		}
 	}
