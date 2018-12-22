@@ -215,7 +215,7 @@ class Webmention_Comments {
 		$sql = "CREATE TABLE $table_name (
 			id mediumint(9) UNSIGNED NOT NULL AUTO_INCREMENT,
 			source varchar(191) DEFAULT '' NOT NULL,
-			post_id bigint(20) UNSIGNED DEFAULT 0  NOT NULL,
+			post_id bigint(20) UNSIGNED DEFAULT 0 NOT NULL,
 			ip varchar(100) DEFAULT '' NOT NULL,
 			status varchar(20) DEFAULT '' NOT NULL,
 			created_at datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
