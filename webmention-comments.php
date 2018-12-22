@@ -175,9 +175,10 @@ class Webmention_Comments {
 
 								// Append URL of actual comment source (like Twitter).
 								if ( ! empty( $microformat['properties']['url'][0] ) ) {
-									$comment_data['comment_content'] .= sprintf( ' <small>Via <a href="%1$s">%2$s</a>.</small>', esc_url( $microformat['properties']['url'][0] ), parse_url( $microformat['properties']['url'][0], PHP_URL_HOST ) );
+									$comment_data['comment_content'] .= '' . sprintf( __( '<small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $microformat['properties']['url'][0] ), parse_url( $microformat['properties']['url'][0], PHP_URL_HOST ) );
 								}
 							}
+
 							break;
 					}
 				}
