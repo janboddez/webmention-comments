@@ -6,6 +6,7 @@
  * Author URI: https://janboddez.tech/
  * License: GNU General Public License v2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
+ * GitHub Plugin URI: https://github.com/janboddez/webmention-comments
  * Version: 0.3
  */
 
