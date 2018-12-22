@@ -30,7 +30,7 @@ class Webmention_Comments {
 		 */
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
-		add_action( 'rest_api_init', function () {
+		add_action( 'rest_api_init', function() {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
 				'methods'  => 'POST',
 				'callback' => array( $this, 'store_webmention' ),
