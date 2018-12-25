@@ -7,7 +7,7 @@
  * License: GNU General Public License v2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
  * GitHub Plugin URI: https://github.com/janboddez/webmention-comments
- * Version: 0.3
+ * Version: 0.4
  */
 
 // Prevent this script from being loaded directly.
@@ -15,19 +15,18 @@ defined( 'ABSPATH' ) or exit;
 
 /**
  * Main plugin class.
+ *
+ * @since 0.2
  */
 class Webmention_Comments {
 	private $db_version = '1.0';
 
 	/**
 	 * Class constructor.
+	 *
+	 * @since 0.2
 	 */
 	public function __construct() {
-		/**
-		 * Registers a new REST API endpoint.
-		 *
-		 * @since 0.2
-		 */
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 		register_uninstall_hook( __FILE__, array( __CLASS__, 'uninstall' ) );
@@ -42,7 +41,7 @@ class Webmention_Comments {
 	}
 
 	/**
-	 * Parses incoming webmentions.
+	 * Stores incoming webmentions and that's about it.
 	 *
 	 * @param WP_REST_Request $request WP REST API request.
 	 *
@@ -67,10 +66,11 @@ class Webmention_Comments {
 		$post = get_page_by_path( $slug, OBJECT, 'post' );
 
 		if ( empty( $post ) || 'publish' !== get_post_status( $post->ID ) ) {
+			// Not found.
 			return new WP_Error( 'not_found', 'Not found', array( 'status' => 404 ) );
 		}
 
-		// Get IP address.
+		// Get sender's IP address.
 		if ( isset( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ) {
 			// This server seems to be behind Cloudflare.
 			$_SERVER['REMOTE_ADDR'] = $_SERVER['HTTP_CF_CONNECTING_IP'];
@@ -105,6 +105,8 @@ class Webmention_Comments {
 
 	/**
 	 * Processes queued webmentions. Typically triggered by WP Cron.
+	 *
+	 * @since 0.3
 	 */
 	public function process_webmentions() {
 		global $wpdb;
@@ -113,10 +115,12 @@ class Webmention_Comments {
 		$webmentions = $wpdb->get_results( "SELECT id, source, post_id, ip, created_at FROM $table_name WHERE status = 'draft' LIMIT 10" );
 
 		if ( empty( $webmentions ) || ! is_array( $webmentions ) ) {
+			// Empty queue.
 			return;
 		}
 
 		foreach ( $webmentions as $webmention ) {
+			// Grab source domain.
 			$host = parse_url( $webmention->source, PHP_URL_HOST );
 
 			// Some defaults.
@@ -126,6 +130,8 @@ class Webmention_Comments {
 				'comment_author_email' => 'someone@example.com',
 				'comment_author_url' => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
 				'comment_author_IP' => $webmention->ip,
+				// Note: I'm currently using <small> to display source info and
+				// have added it to the allowed HTML tags in my theme.
 				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
 				'comment_type' => '',
 				'comment_parent' => 0,
@@ -138,17 +144,18 @@ class Webmention_Comments {
 			// Disable comment flooding check.
 			remove_action( 'check_comment_flood', 'check_comment_flood_db' );
 
-			// Insert new comment.
+			// Insert new comment, mark webmention as processed.
 			$comment_id = wp_new_comment( $commentdata, true );
 			$wpdb->update(
 				$table_name,
-				array( 'status' => 'processed' ),
+				array( 'status' => 'complete' ),
 				array( 'id' => $webmention->id ),
 				array( '%s' ),
 				array( '%d' )
 			);
 
 			if ( is_wp_error( $comment_id ) ) {
+				// For troubleshooting.
 				error_log( print_r( $comment_id, true ) );
 			}
 		}
@@ -160,6 +167,8 @@ class Webmention_Comments {
 	 * @param array &$commentdata Comment (meta)data.
 	 * @param string $source Webmention source URL.
 	 * @param string $target Webmention target URL.
+	 *
+	 * @since 0.4
 	 */
 	private function parse_microformats( &$commentdata, $source, $target ) {
 		// Load microformats2 parser.
@@ -197,22 +206,28 @@ class Webmention_Comments {
 	 *
 	 * @param array &$commentdata Comment (meta)data.
 	 * @param array $hentry Array describing an h-entry.
+	 * @param string $source Source URL.
 	 * @param string $target Target URL.
+	 *
 	 * @return bool If the h-entry got parsed.
+	 *
+	 * @since 0.4
 	 */
 	private function parse_hentry( &$commentdata, $hentry, $source, $target ) {
 		$valid_reply = false;
 
 		if ( ! empty( $hentry['properties']['in-reply-to'] ) && is_array( $hentry['properties']['in-reply-to'] ) && in_array( $target, $hentry['properties']['in-reply-to'] ) ) {
+			// h-entry is in reply to target.
 			$valid_reply = true;
 		}
 
 		if ( ! empty( $hentry['properties']['content'][0]['html'] ) && false !== stripos( $hentry['properties']['content'][0]['html'], $target ) ) {
+			// h-entry mentions target.
 			$valid_reply = true;
 		}
 
 		if ( ! $valid_reply ) {
-			// No mention of our target URL. Do not update comment data.
+			// No mention of our target URL. This h-entry may not be one we're after.
 			return false;
 		}
 
