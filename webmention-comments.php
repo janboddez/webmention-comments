@@ -21,13 +21,16 @@ class Webmention_Comments {
 
 	/**
 	 * Class constructor.
-	 *
-	 * @since 0.1
 	 */
 	public function __construct() {
+		/**
+		 * Registers a new REST API endpoint.
+		 *
+		 * @since 0.2
+		 */
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
-		register_uninstall_hook( __FILE__, array( $this, 'uninstall' ) );
+		register_uninstall_hook( __FILE__, array( __CLASS__, 'uninstall' ) );
 		add_action( 'rest_api_init', function() {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
 				'methods' => 'POST',
@@ -39,12 +42,11 @@ class Webmention_Comments {
 	}
 
 	/**
-	 * Stores incoming webmentions for future parsing.
+	 * Parses incoming webmentions.
 	 *
 	 * @param WP_REST_Request $request WP REST API request.
-	 * @return WP_REST_Response Response in JSON format.
 	 *
-	 * @since 0.3
+	 * @since 0.2
 	 */
 	public function store_webmention( $request ) {
 		// Verify source nor target are invalid URLs.
@@ -94,15 +96,15 @@ class Webmention_Comments {
 			// Create an empty REST response and add an 'Accepted' status code.
 			$response = new WP_REST_Response( array() );
 			$response->set_status( 202 );
+
+			return $response;
 		}
 
 		return new WP_Error( 'invalid_request', 'Invalid source or target', array( 'status' => 400 ) );
 	}
 
 	/**
-	 * Processes stored webmentions (currently limited to ten per hour).
-	 *
-	 * @since 0.3
+	 * Processes queued webmentions. Typically triggered by WP Cron.
 	 */
 	public function process_webmentions() {
 		global $wpdb;
@@ -118,110 +120,150 @@ class Webmention_Comments {
 			$host = parse_url( $webmention->source, PHP_URL_HOST );
 
 			// Some defaults.
-			$comment_data = array(
+			$commentdata = array(
 				'comment_post_ID' => $webmention->post_id,
 				'comment_author' => $host,
 				'comment_author_email' => 'someone@example.com',
 				'comment_author_url' => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
 				'comment_author_IP' => $webmention->ip,
-				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>.', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
+				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
 				'comment_type' => '',
 				'comment_parent' => 0,
 				'user_id' => 0,
 			);
 
-			// Load microformats2 parser.
-			require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
-			$mf = Mf2\fetch( $webmention->source );
+			// Search source for supported microformats. Returns void.
+			$this->parse_microformats( $commentdata, $webmention->source, get_permalink( $webmention->post_id ) );
 
-			if ( is_array( $mf ) && ! empty( $mf['items'] ) ) {
-				// Get whatever first microformat encountered.
-				$microformat = $mf['items'][0];
+			// Disable comment flooding check.
+			remove_action( 'check_comment_flood', 'check_comment_flood_db' );
 
-				// Start filling the comment data array.
-				if ( ! empty( $microformat['type'][0] ) ) {
-					switch( $microformat['type'][0] ) {
-						case 'h-feed':
-							if ( empty( $microformat['children'][0]['type'][0] ) || 'h-entry' !== $microformat['children'][0]['type'][0] ) {
-								// Break out of the switch.
-								break;
-							} else {
-								// Continue processing this h-entry.
-								$microformat = $microformat['children'][0];
-							}
+			// Insert new comment.
+			$comment_id = wp_new_comment( $commentdata, true );
+			$wpdb->update(
+				$table_name,
+				array( 'status' => 'processed' ),
+				array( 'id' => $webmention->id ),
+				array( '%s' ),
+				array( '%d' )
+			);
 
-						case 'h-entry':
-						default:
-							// Set author name.
-							if ( ! empty( $microformat['properties']['author'][0]['properties']['name'][0] ) ) {
-								$comment_data['comment_author'] = $microformat['properties']['author'][0]['properties']['name'][0];
-							}
+			if ( is_wp_error( $comment_id ) ) {
+				error_log( print_r( $comment_id, true ) );
+			}
+		}
+	}
 
-							// Set author URL.
-							if ( ! empty( $microformat['properties']['author'][0]['properties']['url'][0] ) ) {
-								$comment_data['comment_author_url'] = $microformat['properties']['author'][0]['properties']['url'][0];
-							}
+	/**
+	 * Updates comment (meta)data using microformats.
+	 *
+	 * @param array &$commentdata Comment (meta)data.
+	 * @param string $source Webmention source URL.
+	 * @param string $target Webmention target URL.
+	 */
+	private function parse_microformats( &$commentdata, $source, $target ) {
+		// Load microformats2 parser.
+		require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
 
-							// Set comment datetime, from GMT.
-							if ( ! empty( $microformat['properties']['published'][0] ) ) {
-								if ( 0 !== strpos( $host, 'brid-gy.appspot.com' ) ) {
-									// Bridgy uses GMT.
-									$comment_data['comment_date'] = get_date_from_gmt( date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) ) );
-									$comment_data['comment_date_gmt'] = date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) );
-								} else {
-									// My WordPress site plus Webmention plugin does not.
-									$comment_data['comment_date'] = date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) );
-									$comment_data['comment_date_gmt'] = get_gmt_from_date( date( 'Y-m-d H:i:s', strtotime( $microformat['properties']['published'][0] ) ) );
-								}
-							}
+		// Parse source URL.
+		$mf = Mf2\fetch( $source );
 
-							// Set comment content.
-							if ( ! empty( $microformat['properties']['content'][0]['html'] ) ) {
-								$comment_data['comment_content'] = wp_trim_words( trim( strip_tags( $microformat['properties']['content'][0]['html'] ) ), 10, ' &hellip;' );
+		if ( empty( $mf['items'][0]['type'][0] ) ) {
+			// Nothing to see here. Bail.
+			return;
+		}
 
-								// Append URL of actual comment source (like Twitter).
-								if ( ! empty( $microformat['properties']['url'][0] ) ) {
-									$comment_data['comment_content'] .= '' . sprintf( __( '<small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $microformat['properties']['url'][0] ), parse_url( $microformat['properties']['url'][0], PHP_URL_HOST ) );
-								}
-							}
+		if ( 'h-entry' === $mf['items'][0]['type'][0] ) {
+			// Top-most item is an h-entry. Let's try to parse it.
+			$this->parse_hentry( $commentdata, $mf['items'][0], $source, $target );
+		} elseif ( 'h-feed' === $mf['items'][0]['type'][0] ) {
+			// Top-most item is an h-feed.
+			if ( empty( $mf['items'][0]['children'] ) || ! is_array( $mf['items'][0]['children'] ) ) {
+				return;
+			}
 
-							break;
-					}
-				}
-
-				// Disable comment flooding check.
-				remove_action( 'check_comment_flood', 'check_comment_flood_db' );
-
-				// Insert new comment.
-				$comment_id = wp_new_comment( $comment_data, true );
-				$wpdb->update(
-					$table_name,
-					array( 'status' => 'processed' ),
-					array( 'id' => $webmention->id ),
-					array( '%s' ),
-					array( '%d' )
-				);
-
-				if ( is_wp_error( $comment_id ) ) {
-					error_log( print_r( $comment_id, true ) );
+			// Loop through its children.
+			foreach ( $mf['items'][0]['children'] as $child ) {
+				if ( ! empty( $child['type'][0] ) && 'h-entry' === $child['type'][0] && $this->parse_hentry( $commentdata, $child, $source, $target ) ) {
+					// Got what we need. Break out of the loop.
+					break;
 				}
 			}
 		}
 	}
 
 	/**
-	 * Broadcasts the Webmention endpoint on the front end.
+	 * Updates comment (meta)data using h-entry properties.
 	 *
-	 * @since 0.3
+	 * @param array &$commentdata Comment (meta)data.
+	 * @param array $hentry Array describing an h-entry.
+	 * @param string $target Target URL.
+	 * @return bool If the h-entry got parsed.
+	 */
+	private function parse_hentry( &$commentdata, $hentry, $source, $target ) {
+		$valid_reply = false;
+
+		if ( ! empty( $hentry['properties']['in-reply-to'] ) && is_array( $hentry['properties']['in-reply-to'] ) && in_array( $target, $hentry['properties']['in-reply-to'] ) ) {
+			$valid_reply = true;
+		}
+
+		if ( ! empty( $hentry['properties']['content'][0]['html'] ) && false !== stripos( $hentry['properties']['content'][0]['html'], $target ) ) {
+			$valid_reply = true;
+		}
+
+		if ( ! $valid_reply ) {
+			// No mention of our target URL. Do not update comment data.
+			return false;
+		}
+
+		// Set author name.
+		if ( ! empty( $hentry['properties']['author'][0]['properties']['name'][0] ) ) {
+			$commentdata['comment_author'] = $hentry['properties']['author'][0]['properties']['name'][0];
+		}
+
+		// Set author URL.
+		if ( ! empty( $hentry['properties']['author'][0]['properties']['url'][0] ) ) {
+			$commentdata['comment_author_url'] = $hentry['properties']['author'][0]['properties']['url'][0];
+		}
+
+		// Set comment datetime.
+		if ( ! empty( $hentry['properties']['published'][0] ) ) {
+			$host = parse_url( $source, PHP_URL_HOST );
+
+			if ( 0 !== stripos( $host, 'brid-gy.appspot.com' ) ) {
+				// Bridgy, we know, uses GMT.
+				$commentdata['comment_date'] = get_date_from_gmt( date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) ) );
+				$commentdata['comment_date_gmt'] = date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) );
+			} else {
+				// Most WordPress sites do not.
+				$commentdata['comment_date'] = date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) );
+				$commentdata['comment_date_gmt'] = get_gmt_from_date( date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) ) );
+			}
+		}
+
+		// Set comment content.
+		if ( ! empty( $hentry['properties']['content'][0]['html'] ) ) {
+			$commentdata['comment_content'] = wp_trim_words( trim( strip_tags( $hentry['properties']['content'][0]['html'] ) ), 25, ' &hellip;' );
+
+			// Append URL of actual comment source (like a tweet or blog post).
+			if ( ! empty( $hentry['properties']['url'][0] ) ) {
+				$commentdata['comment_content'] .= ' ' . sprintf( __( '<small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $hentry['properties']['url'][0] ), parse_url( $hentry['properties']['url'][0], PHP_URL_HOST ) );
+			}
+		}
+
+		// Well, we've replaced whatever comment data we could find.
+		return true;
+	}
+
+	/**
+	 * Prints the webmention endpoint.
 	 */
 	public function webmention_link() {
 		echo '<link rel="webmention" href="'. esc_url( get_rest_url( null, '/webmention-comments/v1/create') ) . '" />' . PHP_EOL;
 	}
 
 	/**
-	 * Sets things up on activation.
-	 *
-	 * @since 0.3
+	 * Sets WordPress up for use with this plugin.
 	 */
 	public function activate() {
 		global $wpdb;
@@ -243,7 +285,7 @@ class Webmention_Comments {
 		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 		dbDelta( $sql );
 
-		// Set up cron event for asynchronous Webmention processing.
+		// Set up cron event for Webmention processing.
 		if ( false === wp_next_scheduled( 'process_webmentions' ) ) {
 			wp_schedule_event( time(), 'hourly', 'process_webmentions' );
 		}
@@ -253,27 +295,21 @@ class Webmention_Comments {
 	}
 
 	/**
-	 * Cleans things up on deactivation.
-	 *
-	 * @since 0.3
+	 * Cleans up after deactivation.
 	 */
 	public function deactivate() {
 		wp_clear_scheduled_hook( 'process_webmentions' );
 	}
 
 	/**
-	 * Really cleans up during uninstall.
-	 *
-	 * @since 0.3
+	 * Cleans up for real during uninstall.
 	 */
-	public function uninstall() {
+	public static function uninstall() {
 		global $wpdb;
 
-		// Delete database table.
 		$table_name = $wpdb->prefix . 'webmention_comments';
 		$wpdb->query( "DROP TABLE IF EXISTS $table_name" );
 
-		// Delete current database version.
 		delete_option( 'webmention_comments_db_version' );
 	}
 }
