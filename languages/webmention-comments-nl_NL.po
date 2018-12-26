@@ -1,0 +1,27 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Webmention Comments\n"
+"POT-Creation-Date: 2018-12-26 14:16+0100\n"
+"PO-Revision-Date: 2018-12-26 14:17+0100\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: nl_NL\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 2.0.6\n"
+"X-Poedit-Basepath: ..\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Poedit-KeywordsList: __;_e\n"
+"X-Poedit-SearchPath-0: .\n"
+"X-Poedit-SearchPathExcluded-0: languages\n"
+
+#: webmention-comments.php:147
+#, php-format
+msgid "&hellip; commented on this. <small>Via <a href=\"%1$s\">%2$s</a>.</small>"
+msgstr "&hellip; heeft op dit bericht gereageerd. <small>Via <a href=\"%1$s\">%2$s</a>.</small>"
+
+#: webmention-comments.php:277
+#, php-format
+msgid "<small>Via <a href=\"%1$s\">%2$s</a>.</small>"
+msgstr "<small>Via <a href=\"%1$s\">%2$s</a>.</small>"

@@ -2,11 +2,12 @@
 /**
  * Plugin Name: Webmention Comments
  * Description: Turn incoming Webmentions, from other blogs or services like Bridgy, into WordPress comments.
+ * GitHub Plugin URI: https://github.com/janboddez/webmention-comments
  * Author: Jan Boddez
  * Author URI: https://janboddez.tech/
  * License: GNU General Public License v2 or later
  * License URI: http://www.gnu.org/licenses/gpl-2.0.html
- * GitHub Plugin URI: https://github.com/janboddez/webmention-comments
+ * Textdomain: webmention-comments
  * Version: 0.4
  */
 
@@ -19,6 +20,11 @@ defined( 'ABSPATH' ) or exit;
  * @since 0.2
  */
 class Webmention_Comments {
+	/**
+	 * Database table version, in case we ever want to upgrade its structure.
+	 *
+	 * @since 0.3
+	 */
 	private $db_version = '1.0';
 
 	/**
@@ -27,17 +33,22 @@ class Webmention_Comments {
 	 * @since 0.2
 	 */
 	public function __construct() {
+		// Activation, deactivation and uninstall hooks.
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 		register_uninstall_hook( __FILE__, array( __CLASS__, 'uninstall' ) );
+
+		// Register a new REST API route (it's that easy).
 		add_action( 'rest_api_init', function() {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
 				'methods' => 'POST',
 				'callback' => array( $this, 'store_webmention' ),
 			) );
 		} );
+
 		add_action( 'process_webmentions', array( $this, 'process_webmentions' ) );
 		add_action( 'wp_head', array( $this, 'webmention_link' ) );
+		add_action( 'plugins_loaded', array( $this, 'load_textdomain' ) );
 	}
 
 	/**
@@ -326,6 +337,15 @@ class Webmention_Comments {
 		$wpdb->query( "DROP TABLE IF EXISTS $table_name" );
 
 		delete_option( 'webmention_comments_db_version' );
+	}
+
+	/**
+	 * Enables i18n of this plugin.
+	 *
+	 * @since 0.4
+	 */
+	public function load_textdomain() {
+		load_plugin_textdomain( 'webmention-comments', false, basename( dirname( __FILE__ ) ) . '/languages' );
 	}
 }
 
