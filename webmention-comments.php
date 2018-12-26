@@ -285,7 +285,7 @@ class Webmention_Comments {
 	 * Prints the webmention endpoint.
 	 */
 	public function webmention_link() {
-		echo '<link rel="webmention" href="'. esc_url( get_rest_url( null, '/webmention-comments/v1/create') ) . '" />' . PHP_EOL;
+		echo '<link rel="webmention" href="'. esc_url( get_rest_url( null, '/webmention-comments/v1/create' ) ) . '" />' . PHP_EOL;
 	}
 
 	/**
