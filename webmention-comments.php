@@ -81,14 +81,8 @@ class Webmention_Comments {
 			return new WP_Error( 'not_found', 'Not found', array( 'status' => 404 ) );
 		}
 
-		// Get sender's IP address.
-		if ( ! is_null( $request->get_header( 'cf_connecting_ip' ) ) ) {
-			// This server could be behind Cloudflare.
-			$_SERVER['REMOTE_ADDR'] = $request->get_header( 'cf_connecting_ip' );
-		}
-
-		// Set IP address.
-		$ip = preg_replace( '/[^0-9a-fA-F:., ]/', '', $_SERVER['REMOTE_ADDR'] );
+		// Set sender's IP address.
+		$ip = preg_replace( '/[^0-9a-fA-F:., ]/', '', apply_filters( 'webmention_comments_sender_ip', $_SERVER['REMOTE_ADDR'], $request ) );
 
 		global $wpdb;
 
@@ -141,8 +135,7 @@ class Webmention_Comments {
 				'comment_author_email' => 'someone@example.com',
 				'comment_author_url' => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
 				'comment_author_IP' => $webmention->ip,
-				// Note: I'm currently using <small> to display source info and
-				// have added it to the allowed HTML tags in my theme.
+				// Note: The <small> tag may be stripped out if not added to the allowed tags elsewhere.
 				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
 				'comment_type' => '',
 				'comment_parent' => 0,
@@ -157,18 +150,24 @@ class Webmention_Comments {
 
 			// Insert new comment, mark webmention as processed.
 			$comment_id = wp_new_comment( $commentdata, true );
-			$wpdb->update(
-				$table_name,
-				array( 'status' => 'complete' ),
-				array( 'id' => $webmention->id ),
-				array( '%s' ),
-				array( '%d' )
-			);
+
+			$status = 'complete';
 
 			if ( is_wp_error( $comment_id ) ) {
 				// For troubleshooting.
 				error_log( print_r( $comment_id, true ) );
+				if ( in_array( 'comment_duplicate', $comment_id->get_error_codes() ) ) {
+					$status = 'duplicate';
+				}
 			}
+
+			$wpdb->update(
+				$table_name,
+				array( 'status' => $status ),
+				array( 'id' => $webmention->id ),
+				array( '%s' ),
+				array( '%d' )
+			);
 		}
 	}
 
