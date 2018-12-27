@@ -82,9 +82,9 @@ class Webmention_Comments {
 		}
 
 		// Get sender's IP address.
-		if ( isset( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ) {
-			// This server seems to be behind Cloudflare.
-			$_SERVER['REMOTE_ADDR'] = $_SERVER['HTTP_CF_CONNECTING_IP'];
+		if ( ! is_null( $request->get_header( 'cf_connecting_ip' ) ) ) {
+			// This server could be behind Cloudflare.
+			$_SERVER['REMOTE_ADDR'] = $request->get_header( 'cf_connecting_ip' );
 		}
 
 		// Set IP address.
