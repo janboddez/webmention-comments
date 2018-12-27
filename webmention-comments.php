@@ -194,10 +194,10 @@ class Webmention_Comments {
 		}
 
 		if ( 'h-entry' === $mf['items'][0]['type'][0] ) {
-			// Top-most item is an h-entry. Let's try to parse it.
+			// Topmost item is an h-entry. Let's try to parse it.
 			$this->parse_hentry( $commentdata, $mf['items'][0], $source, $target );
 		} elseif ( 'h-feed' === $mf['items'][0]['type'][0] ) {
-			// Top-most item is an h-feed.
+			// Topmost item is an h-feed.
 			if ( empty( $mf['items'][0]['children'] ) || ! is_array( $mf['items'][0]['children'] ) ) {
 				return;
 			}
