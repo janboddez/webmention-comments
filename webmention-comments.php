@@ -94,7 +94,7 @@ class Webmention_Comments {
 		$num_rows = $wpdb->insert(
 			$wpdb->prefix . 'webmention_comments',
 			array(
-				'source' => esc_url( $request['source'] ),
+				'source' => esc_url_raw( $request['source'] ),
 				'post_id' => $post->ID,
 				'ip' => $ip,
 				'status' => 'draft',
@@ -138,7 +138,7 @@ class Webmention_Comments {
 				'comment_post_ID' => $webmention->post_id,
 				'comment_author' => $host,
 				'comment_author_email' => 'someone@example.com',
-				'comment_author_url' => esc_url( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
+				'comment_author_url' => esc_url_raw( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
 				'comment_author_IP' => $webmention->ip,
 				// Note: The <small> tag may be stripped out if not added to the allowed tags elsewhere.
 				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
