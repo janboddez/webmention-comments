@@ -194,25 +194,27 @@ class Webmention_Comments {
 		// Scan it for outgoing links.
 		$urls = $client->findOutgoingLinks( $html );
 
-		if ( ! empty( $urls ) && is_array( $urls ) ) {
-			// Loop through all of the links.
-			foreach ( $urls as $url ) {
-				// Try and find a Webmention endpoint.
-				$endpoint = $client->discoverWebmentionEndpoint( $url );
+		if ( empty( $urls ) || ! is_array( $urls ) ) {
+			// Nothing to do. Bail.
+			return;
+		}
 
-				if ( $endpoint ) {
-					// Send the webmention.
-					$response = wp_safe_remote_post( $endpoint, array(
-						'body'=> array(
-							'source' => rawurlencode( get_permalink( $post_id ) ),
-							'target' => rawurlencode( $url ),
-						),
-					) );
+		foreach ( $urls as $url ) {
+			// Try to find a Webmention endpoint.
+			$endpoint = $client->discoverWebmentionEndpoint( $url );
 
-					if ( is_wp_error( $response ) ) {
-						// Something went wrong.
-						error_log( print_r( $response->get_error_messages(), true ) );
-					}
+			if ( $endpoint ) {
+				// Send the webmention.
+				$response = wp_safe_remote_post( $endpoint, array(
+					'body'=> array(
+						'source' => rawurlencode( get_permalink( $post_id ) ),
+						'target' => rawurlencode( $url ),
+					),
+				) );
+
+				if ( is_wp_error( $response ) ) {
+					// Something went wrong.
+					error_log( print_r( $response->get_error_messages(), true ) );
 				}
 			}
 		}
