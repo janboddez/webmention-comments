@@ -1,3 +1,6 @@
 [submodule "vendor/php-mf2"]
 	path = vendor/php-mf2
 	url = https://github.com/microformats/php-mf2
+[submodule "vendor/mention-client-php"]
+	path = vendor/mention-client-php
+	url = https://github.com/indieweb/mention-client-php

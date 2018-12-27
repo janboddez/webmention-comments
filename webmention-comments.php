@@ -5,14 +5,18 @@
  * GitHub Plugin URI: https://github.com/janboddez/webmention-comments
  * Author: Jan Boddez
  * Author URI: https://janboddez.tech/
- * License: GNU General Public License v2 or later
- * License URI: http://www.gnu.org/licenses/gpl-2.0.html
+ * License: GNU General Public License v3
+ * License URI: http://www.gnu.org/licenses/gpl-3.0.html
  * Textdomain: webmention-comments
- * Version: 0.4
+ * Version: 0.5
  */
 
 // Prevent this script from being loaded directly.
 defined( 'ABSPATH' ) or exit;
+
+// Load microformats2 parser and Webmention Client.
+require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
+require_once dirname( __FILE__ ) . '/vendor/mention-client-php/src/IndieWeb/MentionClient.php';
 
 /**
  * Main plugin class.
@@ -47,6 +51,7 @@ class Webmention_Comments {
 		} );
 
 		add_action( 'process_webmentions', array( $this, 'process_webmentions' ) );
+		add_action( 'publish_post', array( $this, 'send_webmention' ), 10, 2 );
 		add_action( 'wp_head', array( $this, 'webmention_link' ) );
 		add_action( 'plugins_loaded', array( $this, 'load_textdomain' ) );
 	}
@@ -172,6 +177,48 @@ class Webmention_Comments {
 	}
 
 	/**
+	 * Attempts to send webmentions to all URLs mentioned in a post.
+	 *
+	 * @param int $post_id Unique ID of the WordPress post.
+	 * @param WP_Post $post The corresponding WP_Post object.
+	 *
+	 * @since 0.5
+	 */
+	public function send_webmention( $post_id, $post ) {
+		// Init Webmention Client.
+		$client = new IndieWeb\MentionClient();
+
+		// Fetch our post's HTML.
+		$html = apply_filters( 'the_content', $post->post_content );
+
+		// Scan it for outgoing links.
+		$urls = $client->findOutgoingLinks( $html );
+
+		if ( ! empty( $urls ) && is_array( $urls ) ) {
+			// Loop through all of the links.
+			foreach ( $urls as $url ) {
+				// Try and find a Webmention endpoint.
+				$endpoint = $client->discoverWebmentionEndpoint( $url );
+
+				if ( $endpoint ) {
+					// Send the webmention.
+					$response = wp_safe_remote_post( $endpoint, array(
+						'body'=> array(
+							'source' => rawurlencode( get_permalink( $post_id ) ),
+							'target' => rawurlencode( $url ),
+						),
+					) );
+
+					if ( is_wp_error( $response ) ) {
+						// Something went wrong.
+						error_log( print_r( $response->get_error_messages(), true ) );
+					}
+				}
+			}
+		}
+	}
+
+	/**
 	 * Updates comment (meta)data using microformats.
 	 *
 	 * @param array &$commentdata Comment (meta)data.
@@ -181,9 +228,6 @@ class Webmention_Comments {
 	 * @since 0.4
 	 */
 	private function parse_microformats( &$commentdata, $source, $target ) {
-		// Load microformats2 parser.
-		require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
-
 		// Parse source URL.
 		$mf = Mf2\fetch( $source );
 
