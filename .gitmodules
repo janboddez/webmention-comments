@@ -4,3 +4,6 @@
 [submodule "vendor/mention-client-php"]
 	path = vendor/mention-client-php
 	url = https://github.com/indieweb/mention-client-php
+[submodule "vendor/html5-php"]
+	path = vendor/html5-php
+	url = https://github.com/Masterminds/html5-php

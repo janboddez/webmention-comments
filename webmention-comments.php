@@ -15,6 +15,7 @@
 defined( 'ABSPATH' ) or exit;
 
 // Load microformats2 parser and Webmention Client.
+require_once dirname( __FILE__ ) . '/vendor/html5-php/src/HTML5.php';
 require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
 require_once dirname( __FILE__ ) . '/vendor/mention-client-php/src/IndieWeb/MentionClient.php';
 
@@ -65,7 +66,7 @@ class Webmention_Comments {
 	 */
 	public function store_webmention( $request ) {
 		// Verify source nor target are invalid URLs.
-		if ( empty( $request['source'] ) || empty( $request['target'] ) || ! filter_var( $request['source'], FILTER_VALIDATE_URL ) || ! filter_var( $request['target'], FILTER_VALIDATE_URL ) ) {
+		if ( empty( $request['source'] ) || empty( $request['target'] ) || ! wp_http_validate_url( $request['source'] ) || ! wp_http_validate_url( $request['target'] ) ) {
 			return new WP_Error( 'invalid_request', 'Invalid source or target', array( 'status' => 400 ) );
 		}
 
