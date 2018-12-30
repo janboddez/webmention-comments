@@ -245,7 +245,7 @@ class Webmention_Comments {
 			if ( $endpoint ) {
 				// Send the webmention.
 				$response = wp_safe_remote_post( esc_url_raw( $endpoint ), array(
-					'body'=> array(
+					'body' => array(
 						'source' => rawurlencode( get_permalink( $post_id ) ),
 						'target' => rawurlencode( $url ),
 					),
