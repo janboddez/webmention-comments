@@ -8,7 +8,7 @@
  * License: GNU General Public License v3
  * License URI: http://www.gnu.org/licenses/gpl-3.0.html
  * Textdomain: webmention-comments
- * Version: 0.5
+ * Version: 0.6
  */
 
 // Prevent this script from being loaded directly.
@@ -59,6 +59,7 @@ class Webmention_Comments {
 	 * Stores incoming webmentions and that's about it.
 	 *
 	 * @param WP_REST_Request $request WP REST API request.
+	 * @return WP_REST_Response WP REST API response.
 	 *
 	 * @since 0.2
 	 */
@@ -121,7 +122,7 @@ class Webmention_Comments {
 		global $wpdb;
 
 		$table_name = $wpdb->prefix . 'webmention_comments';
-		$webmentions = $wpdb->get_results( "SELECT id, source, post_id, ip, created_at FROM $table_name WHERE status = 'draft' LIMIT 10" );
+		$webmentions = $wpdb->get_results( "SELECT id, source, post_id, ip, created_at FROM $table_name WHERE status = 'draft' LIMIT 5" );
 
 		if ( empty( $webmentions ) || ! is_array( $webmentions ) ) {
 			// Empty queue.
@@ -129,6 +130,30 @@ class Webmention_Comments {
 		}
 
 		foreach ( $webmentions as $webmention ) {
+			$response = wp_safe_remote_get( esc_url_raw( $webmention->source ) );
+ 
+			if ( is_wp_error( $response ) ) {
+				// Something went wrong. Better luck next time.
+				error_log( print_r( $response->get_error_messages(), true ) );
+				continue;
+			}
+
+			$html = wp_remote_retrieve_body( $response );
+
+			if ( false === stripos( $html, get_permalink( $webmention->post_id ) ) ) {
+				// Target URL not (or no longer) mentioned by source. Mark webmention as processed.
+				$wpdb->update(
+					$table_name,
+					array( 'status' => 'invalid' ), // Can now be 'draft', 'duplicate', 'invalid' or 'complete'.
+					array( 'id' => $webmention->id ),
+					array( '%s' ),
+					array( '%d' )
+				);
+
+				// Skip to next webmention.
+				continue;
+			}
+
 			// Grab source domain.
 			$host = parse_url( $webmention->source, PHP_URL_HOST );
 
@@ -139,35 +164,46 @@ class Webmention_Comments {
 				'comment_author_email' => 'someone@example.com',
 				'comment_author_url' => esc_url_raw( parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
 				'comment_author_IP' => $webmention->ip,
-				// Note: The <small> tag may be stripped out if not added to the allowed tags elsewhere.
+				// Note: The <small> tag may be stripped out if not explicitly
+				// added to the allowed tags elsewhere.
 				'comment_content' => sprintf( __( '&hellip; commented on this. <small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $webmention->source ), $host ),
-				'comment_type' => '',
+				'comment_type' => 'Webmention',
 				'comment_parent' => 0,
 				'user_id' => 0,
 			);
 
-			// Search source for supported microformats. Returns void.
-			$this->parse_microformats( $commentdata, $webmention->source, get_permalink( $webmention->post_id ) );
+			// Search source for supported microformats.
+			// `$possibly_updated_source` gets assigned either the 'real'
+			// source URL, simply `true`, or `null`.
+			$possibly_updated_source = $this->_parse_microformats( $commentdata, $html, $webmention->source, get_permalink( $webmention->post_id ) );
 
 			// Disable comment flooding check.
 			remove_action( 'check_comment_flood', 'check_comment_flood_db' );
 
-			// Insert new comment, mark webmention as processed.
+			// Insert new comment.
 			$comment_id = wp_new_comment( $commentdata, true );
 
+			// Default status. 'Complete' means 'done processing', rather than
+			// 'success'.
 			$status = 'complete';
 
 			if ( is_wp_error( $comment_id ) ) {
 				// For troubleshooting.
 				error_log( print_r( $comment_id, true ) );
+
 				if ( in_array( 'comment_duplicate', $comment_id->get_error_codes() ) ) {
+					// Log if deemed duplicate. Could come in useful if we ever
+					// wanna fix 'updated' webmentions.
 					$status = 'duplicate';
 				}
+			} elseif ( is_string( $possibly_updated_source ) ) {
+				update_comment_meta( $comment_id, 'webmention_source', esc_url_raw( $possibly_updated_source ) );
 			}
 
+			// Mark webmention as processed.
 			$wpdb->update(
 				$table_name,
-				array( 'status' => $status ),
+				array( 'status' => $status ), // Can now be 'draft', 'duplicate', 'invalid' or 'complete'.
 				array( 'id' => $webmention->id ),
 				array( '%s' ),
 				array( '%d' )
@@ -184,6 +220,10 @@ class Webmention_Comments {
 	 * @since 0.5
 	 */
 	public function send_webmention( $post_id, $post ) {
+		if ( defined( 'OUTGOING_WEBMENTIONS' ) && ! OUTGOING_WEBMENTIONS ) {
+			return;
+		}
+
 		// Init Webmention Client.
 		$client = new IndieWeb\MentionClient();
 
@@ -204,7 +244,7 @@ class Webmention_Comments {
 
 			if ( $endpoint ) {
 				// Send the webmention.
-				$response = wp_safe_remote_post( $endpoint, array(
+				$response = wp_safe_remote_post( esc_url_raw( $endpoint ), array(
 					'body'=> array(
 						'source' => rawurlencode( get_permalink( $post_id ) ),
 						'target' => rawurlencode( $url ),
@@ -223,14 +263,16 @@ class Webmention_Comments {
 	 * Updates comment (meta)data using microformats.
 	 *
 	 * @param array &$commentdata Comment (meta)data.
+	 * @param string $html HTML of the webmention source.
 	 * @param string $source Webmention source URL.
 	 * @param string $target Webmention target URL.
+	 * @return string|bool|null On success: the actual webmention source, if found, or true. Nothing on failure.
 	 *
 	 * @since 0.4
 	 */
-	private function parse_microformats( &$commentdata, $source, $target ) {
-		// Parse source URL.
-		$mf = Mf2\fetch( $source );
+	private function _parse_microformats( &$commentdata, $html, $source, $target ) {
+		// Parse source HTML.
+		$mf = Mf2\parse( $html, esc_url_raw( $source ) );
 
 		if ( empty( $mf['items'][0]['type'][0] ) ) {
 			// Nothing to see here. Bail.
@@ -239,7 +281,7 @@ class Webmention_Comments {
 
 		if ( 'h-entry' === $mf['items'][0]['type'][0] ) {
 			// Topmost item is an h-entry. Let's try to parse it.
-			$this->parse_hentry( $commentdata, $mf['items'][0], $source, $target );
+			return $this->_parse_hentry( $commentdata, $mf['items'][0], $source, $target );
 		} elseif ( 'h-feed' === $mf['items'][0]['type'][0] ) {
 			// Topmost item is an h-feed.
 			if ( empty( $mf['items'][0]['children'] ) || ! is_array( $mf['items'][0]['children'] ) ) {
@@ -248,9 +290,9 @@ class Webmention_Comments {
 
 			// Loop through its children.
 			foreach ( $mf['items'][0]['children'] as $child ) {
-				if ( ! empty( $child['type'][0] ) && 'h-entry' === $child['type'][0] && $this->parse_hentry( $commentdata, $child, $source, $target ) ) {
+				if ( ! empty( $child['type'][0] ) && 'h-entry' === $child['type'][0] && $possibly_updated_source = $this->_parse_hentry( $commentdata, $child, $source, $target ) ) {
 					// Got what we need. Break out of the loop.
-					break;
+					return $possibly_updated_source;
 				}
 			}
 		}
@@ -264,11 +306,11 @@ class Webmention_Comments {
 	 * @param string $source Source URL.
 	 * @param string $target Target URL.
 	 *
-	 * @return bool If the h-entry got parsed.
+	 * @return string|bool|null On success: the actual webmention source, if found, or true. Nothing on failure.
 	 *
 	 * @since 0.4
 	 */
-	private function parse_hentry( &$commentdata, $hentry, $source, $target ) {
+	private function _parse_hentry( &$commentdata, $hentry, $source, $target ) {
 		$valid_reply = false;
 
 		if ( ! empty( $hentry['properties']['in-reply-to'] ) && is_array( $hentry['properties']['in-reply-to'] ) && in_array( $target, $hentry['properties']['in-reply-to'] ) ) {
@@ -283,7 +325,7 @@ class Webmention_Comments {
 
 		if ( ! $valid_reply ) {
 			// No mention of our target URL. This h-entry may not be one we're after.
-			return false;
+			return;
 		}
 
 		// Set author name.
@@ -319,6 +361,12 @@ class Webmention_Comments {
 			if ( ! empty( $hentry['properties']['url'][0] ) ) {
 				$commentdata['comment_content'] .= ' ' . sprintf( __( '<small>Via <a href="%1$s">%2$s</a>.</small>', 'webmention-comments' ), esc_url( $hentry['properties']['url'][0] ), parse_url( $hentry['properties']['url'][0], PHP_URL_HOST ) );
 			}
+		}
+
+		if ( ! empty( $hentry['properties']['url'][0] ) ) {
+			// Return URL of actual comment source, to be stored in a custom
+			// field later on.
+			return $hentry['properties']['url'][0];
 		}
 
 		// Well, we've replaced whatever comment data we could find.
