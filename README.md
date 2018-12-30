@@ -1,4 +1,4 @@
-# Webmentions to Comments
+# Webmention Comments
 Basic Webmention support for WordPress.
 
 Turns incoming webmentions into comments. All webmentions undergo basic validation and are then dumped into a database table. The content of that table is parsed once per hour, i.e., asynchronously.

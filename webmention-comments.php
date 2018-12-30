@@ -15,9 +15,7 @@
 defined( 'ABSPATH' ) or exit;
 
 // Load microformats2 parser and Webmention Client.
-require_once dirname( __FILE__ ) . '/vendor/html5-php/src/HTML5.php';
-require_once dirname( __FILE__ ) . '/vendor/php-mf2/Mf2/Parser.php';
-require_once dirname( __FILE__ ) . '/vendor/mention-client-php/src/IndieWeb/MentionClient.php';
+require_once dirname( __FILE__ ) . '/vendor/autoload.php';
 
 /**
  * Main plugin class.
