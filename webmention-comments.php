@@ -14,7 +14,7 @@
 // Prevent this script from being loaded directly.
 defined( 'ABSPATH' ) or exit;
 
-// Load microformats2 parser and Webmention Client.
+// Load Composer's autoloader.
 require_once dirname( __FILE__ ) . '/vendor/autoload.php';
 
 /**
@@ -41,7 +41,7 @@ class Webmention_Comments {
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 		register_uninstall_hook( __FILE__, array( __CLASS__, 'uninstall' ) );
 
-		// Register a new REST API route (it's that easy).
+		// Register a new REST API route. (It's that easy.)
 		add_action( 'rest_api_init', function() {
 			register_rest_route( 'webmention-comments/v1', '/create', array(
 				'methods' => 'POST',
@@ -79,7 +79,7 @@ class Webmention_Comments {
 		), '/' );
 
 		// Fetch the post.
-		$post = get_page_by_path( $slug, OBJECT, 'post' );
+		$post = get_page_by_path( esc_url_raw( $slug ), OBJECT, 'post' );
 
 		if ( empty( $post ) || 'publish' !== get_post_status( $post->ID ) ) {
 			// Not found.
@@ -91,6 +91,7 @@ class Webmention_Comments {
 
 		global $wpdb;
 
+		// Store. All parsing will happen later.
 		$num_rows = $wpdb->insert(
 			$wpdb->prefix . 'webmention_comments',
 			array(
@@ -133,18 +134,29 @@ class Webmention_Comments {
 			$response = wp_safe_remote_get( esc_url_raw( $webmention->source ) );
  
 			if ( is_wp_error( $response ) ) {
-				// Something went wrong. Better luck next time.
+				// Something went wrong.
+				$wpdb->update(
+					$table_name,
+					array( 'status' => 'failed' ), // Can now be 'draft', 'failed', duplicate', 'invalid' or 'complete'.
+					array( 'id' => $webmention->id ),
+					array( '%s' ),
+					array( '%d' )
+				);
+
+				// Log error(s).
 				error_log( print_r( $response->get_error_messages(), true ) );
+
+				// Skip to next webmention.
 				continue;
 			}
 
 			$html = wp_remote_retrieve_body( $response );
 
 			if ( false === stripos( $html, get_permalink( $webmention->post_id ) ) ) {
-				// Target URL not (or no longer) mentioned by source. Mark webmention as processed.
+				// Target URL not (or no longer) mentioned by source.
 				$wpdb->update(
 					$table_name,
-					array( 'status' => 'invalid' ), // Can now be 'draft', 'duplicate', 'invalid' or 'complete'.
+					array( 'status' => 'invalid' ),
 					array( 'id' => $webmention->id ),
 					array( '%s' ),
 					array( '%d' )
@@ -173,8 +185,8 @@ class Webmention_Comments {
 			);
 
 			// Search source for supported microformats.
-			// `$possibly_updated_source` gets assigned either the 'real'
-			// source URL, simply `true`, or `null`.
+			// `$possibly_updated_source` gets assigned either the 'real' source
+			// URL, simply `true`, or `null`.
 			$possibly_updated_source = $this->_parse_microformats( $commentdata, $html, $webmention->source, get_permalink( $webmention->post_id ) );
 
 			// Disable comment flooding check.
@@ -203,7 +215,7 @@ class Webmention_Comments {
 			// Mark webmention as processed.
 			$wpdb->update(
 				$table_name,
-				array( 'status' => $status ), // Can now be 'draft', 'duplicate', 'invalid' or 'complete'.
+				array( 'status' => $status ),
 				array( 'id' => $webmention->id ),
 				array( '%s' ),
 				array( '%d' )
@@ -221,6 +233,7 @@ class Webmention_Comments {
 	 */
 	public function send_webmention( $post_id, $post ) {
 		if ( defined( 'OUTGOING_WEBMENTIONS' ) && ! OUTGOING_WEBMENTIONS ) {
+			// Outgoing webmentions disabled.
 			return;
 		}
 
@@ -305,7 +318,6 @@ class Webmention_Comments {
 	 * @param array $hentry Array describing an h-entry.
 	 * @param string $source Source URL.
 	 * @param string $target Target URL.
-	 *
 	 * @return string|bool|null On success: the actual webmention source, if found, or true. Nothing on failure.
 	 *
 	 * @since 0.4
