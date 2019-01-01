@@ -182,6 +182,8 @@ class Webmention_Comments {
 				'comment_type' => 'Webmention',
 				'comment_parent' => 0,
 				'user_id' => 0,
+				'comment_date' => $webmention->created_at,
+				'comment_date_gmt'=> get_gmt_from_date( $webmention->created_at ),
 			);
 
 			// Search source for supported microformats.
@@ -354,7 +356,7 @@ class Webmention_Comments {
 		if ( ! empty( $hentry['properties']['published'][0] ) ) {
 			$host = parse_url( $source, PHP_URL_HOST );
 
-			if ( 0 !== stripos( $host, 'brid-gy.appspot.com' ) ) {
+			if ( false !== stripos( $host, 'brid-gy.appspot.com' ) ) {
 				// Bridgy, we know, uses GMT.
 				$commentdata['comment_date'] = get_date_from_gmt( date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) ) );
 				$commentdata['comment_date_gmt'] = date( 'Y-m-d H:i:s', strtotime( $hentry['properties']['published'][0] ) );
