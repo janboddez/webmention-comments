@@ -13,6 +13,8 @@ This behavior, however, is easily disabled by adding `define('OUTGOING_WEBMENTIO
 
 To re-send a webmention when a published post is updated, one would have to first delete the (hidden) `_webmention_sent` custom field for that post. It is entirely possible to do so, but requires some creativity. (I.e., for power users only.)
 
+Sending webmentions on delete is not currently supported.
+
 ## Filter and Action Hooks
 ### `webmention_comments_post_types`
 Use to declare supported post types. Example:
