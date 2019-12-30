@@ -28,10 +28,10 @@ add_filter( 'webmention_comments_post_types', function( $post_types ) {
 ### `webmention_comments_post`
 Use to override the "post fetching algorithm." Example:
 ```
-add_filter( 'webmention_comments_post', $post, $request['target'], $supported_post_types ) {
+add_filter( 'webmention_comments_post', $post, $target, $supported_post_types ) {
   if ( empty( $post ) ) {
     // Could we be looking for a page rather than a post?
-    trim( wp_parse_url( $request['target'], PHP_URL_PATH ), '/' );
+    trim( wp_parse_url( $target, PHP_URL_PATH ), '/' );
     $post = get_page_by_path( $path );
   }
 
