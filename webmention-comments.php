@@ -8,7 +8,7 @@
  * License:           GNU General Public License v3
  * License URI:       http://www.gnu.org/licenses/gpl-3.0.html
  * Textdomain:        webmention-comments
- * Version:           0.7
+ * Version:           0.8
  *
  * @author  Jan Boddez <jan@janboddez.be>
  * @license http://www.gnu.org/licenses/gpl-3.0.html GNU General Public License v3.0
@@ -69,7 +69,9 @@ class Webmention_Comments {
 		);
 
 		add_action( 'process_webmentions', array( $this, 'process_webmentions' ) );
-		add_action( 'transition_post_status', array( $this, 'send_webmention' ), 10, 3 );
+		add_action( 'transition_post_status', array( $this, 'schedule_webmention' ), 10, 3 );
+
+		add_action( 'webmention_comments_send', array( $this, 'send_webmention' ) );
 
 		add_action( 'wp_head', array( $this, 'webmention_link' ) );
 	}
@@ -233,22 +235,25 @@ class Webmention_Comments {
 	}
 
 	/**
-	 * Attempts to send webmentions to all URLs mentioned in a post.
+	 * Schedules the sending of webmentions, if enabled.
+	 *
+	 * Scans for outgoing links, but leaves fetching Webmention endpoints to the
+	 * callback function queued in the background.
 	 *
 	 * @param string  $new_status New post status.
 	 * @param string  $old_status Old post status.
-	 * @param WP_Post $post      WP_Post object.
+	 * @param WP_Post $post       Post object.
 	 *
-	 * @since 0.5
+	 * @since 0.8
 	 */
-	public function send_webmention( $new_status, $old_status, $post ) {
-		if ( defined( 'OUTGOING_WEBMENTIONS' ) && ! OUTGOING_WEBMENTIONS ) {
-			// Disabled.
+	public function schedule_webmention( $new_status, $old_status, $post ) {
+		if ( wp_is_post_revision( $post->ID ) || wp_is_post_autosave( $post->ID ) ) {
+			// Prevent double posting.
 			return;
 		}
 
-		if ( wp_is_post_revision( $post->ID ) || wp_is_post_autosave( $post->ID ) ) {
-			// Prevent double posting.
+		if ( defined( 'OUTGOING_WEBMENTIONS' ) && ! OUTGOING_WEBMENTIONS ) {
+			// Disabled.
 			return;
 		}
 
@@ -264,6 +269,53 @@ class Webmention_Comments {
 		}
 
 		if ( '' !== get_post_meta( $post->ID, '_webmention_sent', true ) ) {
+			return;
+		}
+
+		// Init Webmention Client.
+		$client = new \IndieWeb\MentionClient();
+
+		// Fetch our post's HTML.
+		$html = apply_filters( 'the_content', $post->post_content );
+
+		// Scan it for outgoing links.
+		$urls = $client->findOutgoingLinks( $html );
+
+		if ( empty( $urls ) || ! is_array( $urls ) ) {
+			// Nothing to do. Bail.
+			return;
+		}
+
+		// Schedule sending of webmentions (and looking for endpoints) in the
+		// background.
+		wp_schedule_single_event( time() + 120, 'webmention_comments_send', array( $post->ID ) );
+	}
+
+	/**
+	 * Attempts to send webmentions to Webmention-compatible URLs mentioned in
+	 * a post.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @since 0.5
+	 */
+	public function send_webmention( $post_id ) {
+		$post = get_post( $post_id );
+
+		if ( 'publish' !== $post->post_status ) {
+			// Do not send webmention on delete, for now.
+			return;
+		}
+
+		$supported_post_types = (array) apply_filters( 'webmention_comments_post_types', array( 'post' ) );
+
+		if ( ! in_array( $post->post_type, $supported_post_types, true ) ) {
+			// This post type doesn't support Webmention.
+			return;
+		}
+
+		if ( '' !== get_post_meta( $post->ID, '_webmention_sent', true ) ) {
+			// One or more webmentions were sent before.
 			return;
 		}
 
@@ -304,6 +356,7 @@ class Webmention_Comments {
 				}
 
 				update_post_meta( $post->ID, '_webmention_sent', current_time( 'mysql' ) );
+
 				error_log( 'Sent webmention to ' . esc_url_raw( $endpoint ) . '. Response code: ' . wp_remote_retrieve_response_code( $response ) . '.' ); // phpcs:ignore
 			}
 		}
@@ -447,8 +500,13 @@ class Webmention_Comments {
 			case 'mention':
 			case 'reply':
 			default:
-				if ( ! empty( $hentry['properties']['content'][0]['html'] ) ) {
-					// Show an excerpt of the webmention source.
+				// Fetch the bit of text surrounding the link to our page.
+				$context = $this->fetch_context( $hentry['properties']['content'][0]['html'], $target );
+
+				if ( '' !== $context ) {
+					$comment_content = $context;
+				} elseif ( ! empty( $hentry['properties']['content'][0]['html'] ) ) {
+					// Simply show an excerpt of the webmention source.
 					$comment_content = wp_trim_words(
 						wp_strip_all_tags( $hentry['properties']['content'][0]['html'] ),
 						25,
@@ -467,6 +525,73 @@ class Webmention_Comments {
 
 		// Well, we've replaced whatever comment data we could find.
 		return true;
+	}
+
+	/**
+	 * Returns the text surrounding a (back)link. Very heavily inspired by
+	 * WordPress core.
+	 *
+	 * @link https://github.com/WordPress/WordPress/blob/1dcf3eef7a191bd0a6cd21d4382b8b5c5a25c886/wp-includes/class-wp-xmlrpc-server.php#L6929
+	 *
+	 * @param string $html   The remote page's source.
+	 * @param string $target The target URL.
+	 *
+	 * @return string        The excerpt, or an empty string if the target isn't found.
+	 *
+	 * @since 0.8
+	 */
+	private function fetch_context( $html, $target ) {
+		// Work around bug in `strip_tags()`.
+		$html = str_replace( '<!DOC', '<DOC', $html );
+		$html = preg_replace( '/[\r\n\t ]+/', ' ', $html );
+		$html = preg_replace( '/<\/*(h1|h2|h3|h4|h5|h6|p|th|td|li|dt|dd|pre|caption|input|textarea|button|body)[^>]*>/', "\n\n", $html );
+
+		// Remove all script and style tags, including their content.
+		$html = preg_replace( '@<(script|style)[^>]*?>.*?</\\1>@si', '', $html );
+		// Just keep the tag we need.
+		$html = strip_tags( $html, '<a>' );
+
+		$p = explode( "\n\n", $html );
+
+		$preg_target = preg_quote( $target, '|' );
+
+		foreach ( $p as $para ) {
+			if ( strpos( $para, $target ) !== false ) {
+				preg_match( '|<a[^>]+?' . $preg_target . '[^>]*>([^>]+?)</a>|', $para, $context );
+
+				if ( empty( $context ) ) {
+					// The URL isn't in a link context; keep looking.
+					continue;
+				}
+
+				// We're going to use this fake tag to mark the context in a
+				// bit. The marker is needed in case the link text appears more
+				// than once in the paragraph.
+				$excerpt = preg_replace( '|\</?wpcontext\>|', '', $para );
+
+				// Prevent really long link text.
+				if ( strlen( $context[1] ) > 100 ) {
+					$context[1] = substr( $context[1], 0, 100 ) . '&#8230;';
+				}
+
+				$marker      = '<wpcontext>' . $context[1] . '</wpcontext>';  // Set up our marker.
+				$excerpt     = str_replace( $context[0], $marker, $excerpt ); // Swap out the link for our marker.
+				$excerpt     = strip_tags( $excerpt, '<wpcontext>' );         // Strip all tags but our context marker.
+				$excerpt     = trim( $excerpt );
+				$preg_marker = preg_quote( $marker, '|' );
+				$excerpt     = preg_replace( "|.*?\s(.{0,100}$preg_marker.{0,100})\s.*|s", '$1', $excerpt );
+				$excerpt     = strip_tags( $excerpt );                        // phpcs:ignore
+
+				break;
+			}
+		}
+
+		if ( empty( $context ) ) {
+			// Link to target not found.
+			return '';
+		}
+
+		return '[&#8230;] ' . esc_html( $excerpt ) . ' [&#8230;]';
 	}
 
 	/**
@@ -523,7 +648,7 @@ class Webmention_Comments {
 		global $wpdb;
 
 		$table_name = $wpdb->prefix . 'webmention_comments';
-		$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %s', $table_name ) ); // phpcs:ignore
+		$wpdb->query( "DROP TABLE IF EXISTS $table_name" ); // phpcs:ignore
 
 		delete_option( 'webmention_comments_db_version' );
 	}
