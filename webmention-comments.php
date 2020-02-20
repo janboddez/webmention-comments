@@ -288,7 +288,7 @@ class Webmention_Comments {
 
 		// Schedule sending of webmentions (and looking for endpoints) in the
 		// background.
-		wp_schedule_single_event( time() + 120, 'webmention_comments_send', array( $post->ID ) );
+		wp_schedule_single_event( time() + wp_rand( 0, 300 ), 'webmention_comments_send', array( $post->ID ) );
 	}
 
 	/**
