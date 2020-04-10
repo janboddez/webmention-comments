@@ -1,0 +1,12 @@
+{
+    "require": {
+        "mf2\/mf2": "^0.4",
+        "masterminds\/html5": "^2.5",
+        "indieweb\/mention-client": "^1.2"
+    },
+    "require-dev": {
+        "humbug\/php-scoper": "^0.13"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
