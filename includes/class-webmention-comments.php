@@ -199,7 +199,7 @@ class Webmention_Comments {
 
 			// Some defaults.
 			$commentdata = array(
-				'comment_post_ID'      => $webmention->post_id,
+				'comment_post_ID'      => apply_filters( 'webmention_comments_post_id', $webmention->post_id ),
 				'comment_author'       => $host,
 				'comment_author_email' => 'someone@example.org',
 				'comment_author_url'   => esc_url_raw( wp_parse_url( $webmention->source, PHP_URL_SCHEME ) . '://' . $host ),
@@ -303,8 +303,8 @@ class Webmention_Comments {
 			return;
 		}
 
-		// Schedule sending of webmentions (and looking for endpoints) in the
-		// background.
+		// Schedule the actual looking for Webmention endpoints (and, if
+		// applicable, sending out webmentions) in the background.
 		wp_schedule_single_event( time() + wp_rand( 0, 300 ), 'webmention_comments_send', array( $post->ID ) );
 	}
 
@@ -324,15 +324,10 @@ class Webmention_Comments {
 			return;
 		}
 
-		$supported_post_types = (array) apply_filters( 'webmention_comments_post_types', array( 'post' ) );
+		$supported_post_types = apply_filters( 'webmention_comments_post_types', array( 'post' ) );
 
 		if ( ! in_array( $post->post_type, $supported_post_types, true ) ) {
 			// This post type doesn't support Webmention.
-			return;
-		}
-
-		if ( '' !== get_post_meta( $post->ID, '_webmention_sent', true ) ) {
-			// One or more webmentions were sent before.
 			return;
 		}
 
@@ -342,40 +337,162 @@ class Webmention_Comments {
 		// Fetch our post's HTML.
 		$html = apply_filters( 'the_content', $post->post_content );
 
-		// Scan it for outgoing links.
+		// Scan it for outgoing links, again, as things might have changed.
 		$urls = $client->findOutgoingLinks( $html );
 
 		if ( empty( $urls ) || ! is_array( $urls ) ) {
-			// Nothing to do. Bail.
+			// One or more links must've been removed. Nothing to do. Bail.
 			return;
+		}
+
+		// Fetch whatever Webmention-related stats we've got for this post.
+		$webmention = get_post_meta( $post->ID, '_webmention', true );
+
+		if ( empty( $webmention ) || ! is_array( $webmention ) ) {
+			// Ensure `$webmention` is an array.
+			$webmention = array();
 		}
 
 		foreach ( $urls as $url ) {
 			// Try to find a Webmention endpoint.
-			$endpoint = $client->discoverWebmentionEndpoint( $url );
+			// phpcs:ignore
+			// $endpoint = $client->discoverWebmentionEndpoint( $url );
+			$endpoint = $this->webmention_discover_endpoint( $url );
 
-			if ( false !== wp_http_validate_url( $endpoint ) ) {
-				// Send the webmention.
-				$response = wp_remote_post(
-					esc_url_raw( $endpoint ),
-					array(
-						'body' => array(
-							'source' => get_permalink( $post->ID ),
-							'target' => $url,
-						),
-					)
-				);
-
-				if ( is_wp_error( $response ) ) {
-					// Something went wrong.
-					error_log( 'Error trying to send a webmention to ' . esc_url_raw( $endpoint ) . ': ' . $response->get_error_message() ); // phpcs:ignore
-					continue;
-				}
-
-				update_post_meta( $post->ID, '_webmention_sent', current_time( 'mysql' ) );
-
-				error_log( 'Sent webmention to ' . esc_url_raw( $endpoint ) . '. Response code: ' . wp_remote_retrieve_response_code( $response ) . '.' ); // phpcs:ignore
+			if ( empty( $endpoint ) ) {
+				// Skip.
+				continue;
 			}
+
+			if ( false === wp_http_validate_url( $endpoint ) ) {
+				// Not a valid URL.
+				continue;
+			}
+
+			if ( ! empty( $webmention[ esc_url_raw( $endpoint ) ]['sent'] ) ) {
+				// Succesfully sent before. Skip. Note that this complicates
+				// resending after an update quite a bit.
+				continue;
+			}
+
+			$retries = ( ! empty( $webmention[ esc_url_raw( $endpoint ) ]['retries'] ) ? (int) $webmention[ esc_url_raw( $endpoint ) ]['retries'] : 0 );
+
+			if ( $retries >= 3 ) {
+				// Stop here.
+				error_log( 'Sending webmention to ' . esc_url_raw( $url ) . ' failed 3 times before. Not trying again.' ); // phpcs:ignore
+				continue;
+			}
+
+			// Send the webmention.
+			$response = wp_remote_post(
+				esc_url_raw( $endpoint ),
+				array(
+					'body'    => array(
+						'source' => get_permalink( $post->ID ),
+						'target' => $url,
+					),
+					'timeout' => 15, // The default of 5 seconds leads to time-outs too often.
+				)
+			);
+
+			if ( is_wp_error( $response ) ) {
+				// Something went wrong.
+				error_log( 'Error trying to send a webmention to ' . esc_url_raw( $endpoint ) . ': ' . $response->get_error_message() ); // phpcs:ignore
+
+				$webmention[ esc_url_raw( $endpoint ) ]['retries'] = $retries + 1;
+				update_post_meta( $post->ID, '_webmention', $webmention );
+
+				// Schedule a retry in 5 to 15 minutes.
+				wp_schedule_single_event( time() + wp_rand( 300, 900 ), 'webmention_comments_send', array( $post->ID ) );
+
+				continue;
+			}
+
+			// Success! (Or rather, no immediate error.) Store timestamp.
+			$webmention[ esc_url_raw( $endpoint ) ]['sent'] = current_time( 'mysql' );
+			update_post_meta( $post->ID, '_webmention', $webmention );
+
+			error_log( 'Sent webmention to ' . esc_url_raw( $endpoint ) . '. Response code: ' . wp_remote_retrieve_response_code( $response ) . '.' ); // phpcs:ignore
+		}
+	}
+
+	/**
+	 * Finds a Webmention enpoint for the given URL.
+	 *
+	 * @link https://github.com/pfefferle/wordpress-webmention/blob/master/includes/functions.php#L174
+	 *
+	 * @param string $url URL to ping.
+	 *
+	 * @return string|null Endpoint URL, or nothing on failure.
+	 */
+	private function webmention_discover_endpoint( $url ) {
+		$parsed_url = wp_parse_url( $url );
+
+		if ( ! isset( $parsed_url['host'] ) ) {
+			// Not an URL. This should never happen.
+			return;
+		}
+
+		$args = array(
+			'timeout'             => 15,
+			'limit_response_size' => 1048576,
+			'redirection'         => 20,
+		);
+
+		$response = wp_safe_remote_head(
+			esc_url_raw( $url ),
+			$args
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return;
+		}
+
+		// Check link header.
+		$links = wp_remote_retrieve_header( $response, 'link' );
+
+		if ( $links ) {
+			if ( is_array( $links ) ) {
+				foreach ( $links as $link ) {
+					if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
+						return \WP_Http::make_absolute_url( $result[1], $url );
+					}
+				}
+			} elseif ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $links, $result ) ) {
+				return \WP_Http::make_absolute_url( $result[1], $url );
+			}
+		}
+
+		// Not an (X)HTML, SGML, or XML page. No use going further.
+		if ( preg_match( '#(image|audio|video|model)/#is', wp_remote_retrieve_header( $response, 'content-type' ) ) ) {
+			return;
+		}
+
+		// Now do a GET since we're going to look in the HTML headers (and we're
+		// sure its not a binary file).
+		$response = wp_safe_remote_get(
+			esc_url_raw( $url ),
+			$args
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return;
+		}
+
+		$contents = wp_remote_retrieve_body( $response );
+
+		// Unicode to HTML entities.
+		$contents = mb_convert_encoding( $contents, 'HTML-ENTITIES', mb_detect_encoding( $contents ) );
+
+		libxml_use_internal_errors( true );
+
+		$doc = new \DOMDocument();
+		$doc->loadHTML( $contents );
+
+		$xpath = new \DOMXPath( $doc );
+
+		foreach ( $xpath->query( '(//link|//a)[contains(concat(" ", @rel, " "), " webmention ") or contains(@rel, "webmention.org")]/@href' ) as $result ) {
+			return \WP_Http::make_absolute_url( $result->value, $url );
 		}
 	}
 
@@ -517,18 +634,24 @@ class Webmention_Comments {
 			case 'mention':
 			case 'reply':
 			default:
-				// Fetch the bit of text surrounding the link to our page.
-				$context = $this->fetch_context( $hentry['properties']['content'][0]['html'], $target );
+				if ( ! empty( $hentry['properties']['content'][0]['value'] ) && mb_strlen( $hentry['properties']['content'][0]['value'], 'UTF-8' ) <= 500 &&
+					! empty( $hentry['properties']['content'][0]['html'] ) ) {
+					// If the mention is short enough, simply show it in its entirety.
+					$comment_content = wp_strip_all_tags( $hentry['properties']['content'][0]['html'] );
+				} else {
+					// Fetch the bit of text surrounding the link to our page.
+					$context = $this->fetch_context( $hentry['properties']['content'][0]['html'], $target );
 
-				if ( '' !== $context ) {
-					$comment_content = $context;
-				} elseif ( ! empty( $hentry['properties']['content'][0]['html'] ) ) {
-					// Simply show an excerpt of the webmention source.
-					$comment_content = wp_trim_words(
-						wp_strip_all_tags( $hentry['properties']['content'][0]['html'] ),
-						25,
-						' &hellip;'
-					);
+					if ( '' !== $context ) {
+						$comment_content = $context;
+					} elseif ( ! empty( $hentry['properties']['content'][0]['html'] ) ) {
+						// Simply show an excerpt of the webmention source.
+						$comment_content = wp_trim_words(
+							wp_strip_all_tags( $hentry['properties']['content'][0]['html'] ),
+							25,
+							' &hellip;'
+						);
+					}
 				}
 		}
 
