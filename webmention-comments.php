@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Load dependencies.
-require_once dirname( __FILE__ ) . '/build/vendor/scoper-autoload.php';
+require_once dirname( __FILE__ ) . '/vendor/autoload.php';
 require_once dirname( __FILE__ ) . '/includes/class-webmention-comments.php';
 
 $webmention_comments = Webmention_Comments::get_instance();
