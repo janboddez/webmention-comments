@@ -64,11 +64,3 @@ add_filter( 'webmention_comments_comment', function( $comment_content, $hentry, 
   return $comment_content;
 }, 10, 4 );
 ```
-## Downloading and Prefixing PHP Dependecies
-For reference only and not needed to use the plugin. The `build` folder is checked in and contains the necessary dependencies, after all.
-
-Assuming `humbug/php-scoper` is installed globally:
-```
-composer install --no-dev
-php-scoper add-prefix --force && cd build && composer dump-autoload
-```
