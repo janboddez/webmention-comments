@@ -290,7 +290,7 @@ class Webmention_Comments {
 		}
 
 		// Init Webmention Client.
-		$client = new IndieWeb\MentionClient();
+		$client = new \IndieWeb\MentionClient();
 
 		// Fetch our post's HTML.
 		$html = apply_filters( 'the_content', $post->post_content );
