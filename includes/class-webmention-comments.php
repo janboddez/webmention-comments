@@ -77,8 +77,9 @@ class Webmention_Comments {
 					'webmention-comments/v1',
 					'/create',
 					array(
-						'methods'  => 'POST',
-						'callback' => array( $this, 'store_webmention' ),
+						'methods'             => 'POST',
+						'callback'            => array( $this, 'store_webmention' ),
+						'permission_callback' => '__return_true',
 					)
 				);
 			}
