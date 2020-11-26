@@ -60,8 +60,8 @@ class Webmention_Comments {
 	 */
 	public function register() {
 		// Deactivation and uninstall hooks.
-		register_deactivation_hook( dirname( __FILE__ ) . '/webmention-comments.php', array( $this, 'deactivate' ) );
-		register_uninstall_hook( dirname( __FILE__ ) . '/webmention-comments.php', array( __CLASS__, 'uninstall' ) );
+		register_deactivation_hook( dirname( dirname( __FILE__ ) ) . '/webmention-comments.php', array( $this, 'deactivate' ) );
+		register_uninstall_hook( dirname( dirname( __FILE__ ) ) . '/webmention-comments.php', array( __CLASS__, 'uninstall' ) );
 
 		// Schedule WP-Cron job.
 		add_action( 'init', array( $this, 'activate' ) );
@@ -290,14 +290,11 @@ class Webmention_Comments {
 			return;
 		}
 
-		// Init Webmention Client.
-		$client = new \IndieWeb\MentionClient();
-
 		// Fetch our post's HTML.
 		$html = apply_filters( 'the_content', $post->post_content );
 
 		// Scan it for outgoing links.
-		$urls = $client->findOutgoingLinks( $html );
+		$urls = $this->find_outgoing_links( $html );
 
 		if ( empty( $urls ) || ! is_array( $urls ) ) {
 			// Nothing to do. Bail.
@@ -332,14 +329,11 @@ class Webmention_Comments {
 			return;
 		}
 
-		// Init Webmention Client.
-		$client = new \IndieWeb\MentionClient();
-
 		// Fetch our post's HTML.
 		$html = apply_filters( 'the_content', $post->post_content );
 
 		// Scan it for outgoing links, again, as things might have changed.
-		$urls = $client->findOutgoingLinks( $html );
+		$urls = $this->find_outgoing_links( $html );
 
 		if ( empty( $urls ) || ! is_array( $urls ) ) {
 			// One or more links must've been removed. Nothing to do. Bail.
@@ -357,7 +351,6 @@ class Webmention_Comments {
 		foreach ( $urls as $url ) {
 			// Try to find a Webmention endpoint.
 			// phpcs:ignore
-			// $endpoint = $client->discoverWebmentionEndpoint( $url );
 			$endpoint = $this->webmention_discover_endpoint( $url );
 
 			if ( empty( $endpoint ) ) {
@@ -417,13 +410,37 @@ class Webmention_Comments {
 		}
 	}
 
+
+	/**
+	 * Finds outgoing URLs inside a given bit of HTML.
+	 *
+	 * @param  string $html The HTML.
+	 * @return array        Array of URLs.
+	 */
+	private function find_outgoing_links( $html ) {
+		$html = mb_convert_encoding( $html, 'HTML-ENTITIES', get_bloginfo( 'charset' ) );
+
+		libxml_use_internal_errors( true );
+
+		$doc = new \DOMDocument();
+		$doc->loadHTML( $html );
+
+		$xpath = new \DOMXPath( $doc );
+		$urls  = array();
+
+		foreach ( $xpath->query( '//a/@href' ) as $result ) {
+			$urls[] = $result->value;
+		}
+
+		return $urls;
+	}
+
 	/**
 	 * Finds a Webmention enpoint for the given URL.
 	 *
 	 * @link https://github.com/pfefferle/wordpress-webmention/blob/master/includes/functions.php#L174
 	 *
-	 * @param string $url URL to ping.
-	 *
+	 * @param  string $url URL to ping.
 	 * @return string|null Endpoint URL, or nothing on failure.
 	 */
 	private function webmention_discover_endpoint( $url ) {
@@ -450,14 +467,16 @@ class Webmention_Comments {
 		}
 
 		// Check link header.
-		$link = wp_remote_retrieve_header( $response, 'link' );
+		$links = wp_remote_retrieve_header( $response, 'link' );
 
-		if ( empty( $link ) ) {
+		if ( empty( $links ) ) {
 			return;
 		}
 
-		if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
-			return \WP_Http::make_absolute_url( $result[1], $url );
+		foreach ( (array) $links as $link ) {
+			if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
+				return \WP_Http::make_absolute_url( $result[1], $url );
+			}
 		}
 
 		if ( preg_match( '#(image|audio|video|model)/#is', wp_remote_retrieve_header( $response, 'content-type' ) ) ) {

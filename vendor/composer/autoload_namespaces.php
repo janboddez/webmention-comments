@@ -6,5 +6,4 @@ $vendorDir = dirname(dirname(__FILE__));
 $baseDir = dirname($vendorDir);
 
 return array(
-    'IndieWeb' => array($vendorDir . '/indieweb/mention-client/src'),
 );
