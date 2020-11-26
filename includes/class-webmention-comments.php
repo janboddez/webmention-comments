@@ -450,16 +450,14 @@ class Webmention_Comments {
 		}
 
 		// Check link header.
-		$links = wp_remote_retrieve_header( $response, 'link' );
+		$link = wp_remote_retrieve_header( $response, 'link' );
 
-		if ( is_wp_error( $links ) ) {
+		if ( empty( $link ) ) {
 			return;
 		}
 
-		foreach ( (array) $links as $link ) {
-			if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
-				return \WP_Http::make_absolute_url( $result[1], $url );
-			}
+		if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
+			return \WP_Http::make_absolute_url( $result[1], $url );
 		}
 
 		if ( preg_match( '#(image|audio|video|model)/#is', wp_remote_retrieve_header( $response, 'content-type' ) ) ) {
