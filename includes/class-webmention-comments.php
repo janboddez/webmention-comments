@@ -430,7 +430,7 @@ class Webmention_Comments {
 		$parsed_url = wp_parse_url( $url );
 
 		if ( ! isset( $parsed_url['host'] ) ) {
-			// Not an URL. This should never happen.
+			// Not a URL. This should never happen.
 			return;
 		}
 
@@ -452,20 +452,18 @@ class Webmention_Comments {
 		// Check link header.
 		$links = wp_remote_retrieve_header( $response, 'link' );
 
-		if ( $links ) {
-			if ( is_array( $links ) ) {
-				foreach ( $links as $link ) {
-					if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
-						return \WP_Http::make_absolute_url( $result[1], $url );
-					}
-				}
-			} elseif ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $links, $result ) ) {
+		if ( is_wp_error( $links ) ) {
+			return;
+		}
+
+		foreach ( (array) $links as $link ) {
+			if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
 				return \WP_Http::make_absolute_url( $result[1], $url );
 			}
 		}
 
-		// Not an (X)HTML, SGML, or XML page. No use going further.
 		if ( preg_match( '#(image|audio|video|model)/#is', wp_remote_retrieve_header( $response, 'content-type' ) ) ) {
+			// Not an (X)HTML, SGML, or XML document. No use going further.
 			return;
 		}
 
@@ -481,8 +479,6 @@ class Webmention_Comments {
 		}
 
 		$contents = wp_remote_retrieve_body( $response );
-
-		// Unicode to HTML entities.
 		$contents = mb_convert_encoding( $contents, 'HTML-ENTITIES', mb_detect_encoding( $contents ) );
 
 		libxml_use_internal_errors( true );
