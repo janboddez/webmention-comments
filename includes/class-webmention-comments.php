@@ -469,13 +469,11 @@ class Webmention_Comments {
 		// Check link header.
 		$links = wp_remote_retrieve_header( $response, 'link' );
 
-		if ( empty( $links ) ) {
-			return;
-		}
-
-		foreach ( (array) $links as $link ) {
-			if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
-				return \WP_Http::make_absolute_url( $result[1], $url );
+		if ( ! empty( $links ) ) {
+			foreach ( (array) $links as $link ) {
+				if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
+					return \WP_Http::make_absolute_url( $result[1], $url );
+				}
 			}
 		}
 
