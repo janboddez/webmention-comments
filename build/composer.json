@@ -1,0 +1,11 @@
+{
+    "require": {
+        "mf2\/mf2": "^0.4",
+        "masterminds\/html5": "^2.5"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require-dev": {
+        "10up\/wp_mock": "^0.4.2"
+    }
+}

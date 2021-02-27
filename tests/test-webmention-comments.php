@@ -33,6 +33,7 @@ class Test_Webmention_Comments extends \WP_Mock\Tools\TestCase {
 		\WP_Mock::expectActionAdded( 'process_webmentions', array( $webmention_comments, 'process_webmentions' ) );
 		\WP_Mock::expectActionAdded( 'transition_post_status', array( $webmention_comments, 'schedule_webmention' ), 10, 3 );
 		\WP_Mock::expectActionAdded( 'webmention_comments_send', array( $webmention_comments, 'send_webmention' ) );
+		\WP_Mock::expectActionAdded( 'add_meta_boxes', array( $webmention_comments, 'add_meta_box' ) );
 		\WP_Mock::expectActionAdded( 'wp_head', array( $webmention_comments, 'webmention_link' ) );
 
 		$webmention_comments->register();

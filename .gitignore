@@ -33,3 +33,6 @@ Thumbs.db
 *.rar
 *.tar
 *.zip
+
+vendor/
+vendor/*
