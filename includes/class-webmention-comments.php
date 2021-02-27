@@ -569,7 +569,7 @@ class Webmention_Comments {
 	 */
 	private function parse_microformats( &$commentdata, $html, $source, $target ) {
 		// Parse source HTML.
-		$mf = \Mf2\parse( $html, esc_url_raw( $source ) );
+		$mf = \Webmention_Comments\Mf2\parse( $html, esc_url_raw( $source ) );
 
 		if ( empty( $mf['items'][0]['type'][0] ) ) {
 			// Nothing to see here.
