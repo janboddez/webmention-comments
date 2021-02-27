@@ -89,18 +89,74 @@ class Webmention_Comments {
 		add_action( 'transition_post_status', array( $this, 'schedule_webmention' ), 10, 3 );
 
 		add_action( 'webmention_comments_send', array( $this, 'send_webmention' ) );
+		add_action( 'add_meta_boxes', array( $this, 'add_meta_box' ) );
 
 		add_action( 'wp_head', array( $this, 'webmention_link' ) );
 	}
 
 	/**
+	 * Adds meta box.
+	 *
+	 * @since 0.10
+	 */
+	public function add_meta_box() {
+		// Add meta box, for those post types that are supported.
+		add_meta_box(
+			'webmention-comments',
+			__( 'Webmention', 'webmention-comments' ),
+			array( $this, 'render_meta_box' ),
+			apply_filters( 'webmention_comments_post_types', array( 'post' ) ),
+			'normal',
+			'default'
+		);
+	}
+
+	/**
+	 * Renders meta box.
+	 *
+	 * @since 0.10
+	 *
+	 * @param WP_Post $post Post being edited.
+	 */
+	public function render_meta_box( $post ) {
+		// Webmention data.
+		$webmention = get_post_meta( $post->ID, '_webmention', true );
+
+		if ( ! empty( $webmention ) && is_array( $webmention ) ) {
+			foreach ( $webmention as $endpoint => $data ) :
+				?>
+				<p>
+					<?php
+					if ( ! empty( $data['sent'] ) ) {
+						/* translators: 1: Webmention endpoint 2: Date sent */
+						printf( __( 'Sent to %1$s on %2$s.', 'webmention-comments' ), '<a href="' . $endpoint . '" target="_blank" rel="noopener noreferrer">' . $endpoint . '</a>', date( __( 'M j, Y \a\t H:i', 'webmention-comments' ), strtotime( $data['sent'] ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped,WordPress.DateTime.RestrictedFunctions.date_date
+					} elseif ( ! empty( $data['retries'] ) && $data['retries'] >= 3 ) {
+						/* translators: Webmention endpoint */
+						printf( __( 'Could not send webmention to %s.', 'webmention-comments' ), '<a href="' . $endpoint . '" target="_blank" rel="noopener noreferrer">' . $endpoint . '</a>' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+					} elseif ( ! empty( $data['retries'] ) ) {
+						/* translators: Webmention endpoint */
+						printf( __( 'Could not send webmention to %s. Trying again soon.', 'webmention-comments' ), '<a href="' . $endpoint . '" target="_blank" rel="noopener noreferrer">' . $endpoint . '</a>' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+					}
+					?>
+				</p>
+				<?php
+			endforeach;
+		} elseif ( ! empty( $webmention ) && 'scheduled' === $webmention /*wp_next_scheduled( 'webmention_comments_send', array( $post->ID ) )*/ ) { // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+			// Unsure why `wp_next_scheduled()` won't work.
+			esc_html_e( 'Webmention scheduled.', 'webmention-comments' );
+		} else {
+			esc_html_e( 'No endpoints found.', 'webmention-comments' );
+		}
+	}
+
+	/**
 	 * Stores incoming webmentions and that's about it.
 	 *
-	 * @param WP_REST_Request $request WP REST API request.
-	 *
-	 * @return WP_REST_Response WP REST API response.
-	 *
 	 * @since 0.2
+	 *
+	 * @param WP_REST_Request $request API request.
+	 *
+	 * @return WP_REST_Response API response.
 	 */
 	public function store_webmention( $request ) {
 		// Verify source nor target are invalid URLs.
@@ -286,10 +342,6 @@ class Webmention_Comments {
 			return;
 		}
 
-		if ( '' !== get_post_meta( $post->ID, '_webmention_sent', true ) ) {
-			return;
-		}
-
 		// Fetch our post's HTML.
 		$html = apply_filters( 'the_content', $post->post_content );
 
@@ -303,7 +355,9 @@ class Webmention_Comments {
 
 		// Schedule the actual looking for Webmention endpoints (and, if
 		// applicable, sending out webmentions) in the background.
-		wp_schedule_single_event( time() + wp_rand( 0, 300 ), 'webmention_comments_send', array( $post->ID ) );
+		wp_schedule_single_event( time() + wp_rand( 300, 600 ), 'webmention_comments_send', array( $post->ID ) );
+
+		update_post_meta( $post->ID, '_webmention', 'scheduled' );
 	}
 
 	/**
@@ -353,13 +407,8 @@ class Webmention_Comments {
 			// phpcs:ignore
 			$endpoint = $this->webmention_discover_endpoint( $url );
 
-			if ( empty( $endpoint ) ) {
+			if ( empty( $endpoint ) || false === wp_http_validate_url( $endpoint ) ) {
 				// Skip.
-				continue;
-			}
-
-			if ( false === wp_http_validate_url( $endpoint ) ) {
-				// Not a valid URL.
 				continue;
 			}
 
@@ -410,7 +459,6 @@ class Webmention_Comments {
 		}
 	}
 
-
 	/**
 	 * Finds outgoing URLs inside a given bit of HTML.
 	 *
@@ -418,15 +466,16 @@ class Webmention_Comments {
 	 * @return array        Array of URLs.
 	 */
 	private function find_outgoing_links( $html ) {
-		$html = mb_convert_encoding( $html, 'HTML-ENTITIES', get_bloginfo( 'charset' ) );
+		$html = mb_convert_encoding( $html, 'HTML-ENTITIES', mb_detect_encoding( $html ) );
 
 		libxml_use_internal_errors( true );
 
 		$doc = new \DOMDocument();
 		$doc->loadHTML( $html );
 
-		$xpath = new \DOMXPath( $doc );
-		$urls  = array();
+		$xpath   = new \DOMXPath( $doc );
+		$wp_host = wp_parse_url( home_url(), PHP_URL_HOST );
+		$urls    = array();
 
 		foreach ( $xpath->query( '//a/@href' ) as $result ) {
 			$urls[] = $result->value;
@@ -453,8 +502,8 @@ class Webmention_Comments {
 
 		$args = array(
 			'timeout'             => 15,
-			'limit_response_size' => 1048576,
 			'redirection'         => 20,
+			'limit_response_size' => 1048576,
 		);
 
 		$response = wp_safe_remote_head(
@@ -469,13 +518,11 @@ class Webmention_Comments {
 		// Check link header.
 		$links = wp_remote_retrieve_header( $response, 'link' );
 
-		if ( empty( $links ) ) {
-			return;
-		}
-
-		foreach ( (array) $links as $link ) {
-			if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
-				return \WP_Http::make_absolute_url( $result[1], $url );
+		if ( ! empty( $links ) ) {
+			foreach ( (array) $links as $link ) {
+				if ( preg_match( '/<(.[^>]+)>;\s+rel\s?=\s?[\"\']?(http:\/\/)?webmention(\.org)?\/?[\"\']?/i', $link, $result ) ) {
+					return \WP_Http::make_absolute_url( $result[1], $url );
+				}
 			}
 		}
 
