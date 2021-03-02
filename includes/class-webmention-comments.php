@@ -100,6 +100,11 @@ class Webmention_Comments {
 	 * @since 0.10
 	 */
 	public function add_meta_box() {
+		if ( defined( 'OUTGOING_WEBMENTIONS' ) && ! OUTGOING_WEBMENTIONS ) {
+			// Disabled.
+			return;
+		}
+
 		// Add meta box, for those post types that are supported.
 		add_meta_box(
 			'webmention-comments',
